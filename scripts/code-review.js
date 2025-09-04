@@ -52,16 +52,22 @@ class CodeReviewBot {
     try {
       let baseSha;
       
+      console.log(`🔍 Detecting file changes for commit: ${this.sha}`);
+      console.log(`📋 Event type: ${process.env.GITHUB_EVENT_NAME}`);
+      
       if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
         // For PRs, compare with base branch
+        console.log(`🔗 Pull request #${process.env.GITHUB_EVENT_NUMBER}`);
         const { data: pr } = await this.octokit.rest.pulls.get({
           owner: this.repository.split('/')[0],
           repo: this.repository.split('/')[1],
           pull_number: process.env.GITHUB_EVENT_NUMBER
         });
         baseSha = pr.base.sha;
+        console.log(`📊 PR base: ${baseSha}, head: ${pr.head.sha}`);
       } else {
         // For pushes, compare with previous commit
+        console.log(`📤 Push event - getting previous commit`);
         const { data: commits } = await this.octokit.rest.repos.listCommits({
           owner: this.repository.split('/')[0],
           repo: this.repository.split('/')[1],
@@ -69,13 +75,15 @@ class CodeReviewBot {
           per_page: 2
         });
         baseSha = commits[1]?.sha;
+        console.log(`📊 Current: ${this.sha}, Previous: ${baseSha}`);
       }
 
       if (!baseSha) {
-        console.log('No base commit found, analyzing all files');
+        console.log('⚠️  No base commit found, analyzing all files');
         return await this.getAllFiles();
       }
 
+      console.log(`🔄 Comparing commits: ${baseSha} → ${this.sha}`);
       const { data: comparison } = await this.octokit.rest.repos.compareCommits({
         owner: this.repository.split('/')[0],
         repo: this.repository.split('/')[1],
@@ -83,11 +91,17 @@ class CodeReviewBot {
         head: this.sha
       });
 
-      return comparison.files || [];
+      const files = comparison.files || [];
+      console.log(`📁 Found ${files.length} changed files:`);
+      files.forEach(file => {
+        console.log(`   ${file.status}: ${file.filename}`);
+      });
+
+      return files;
     } catch (error) {
-      console.error('Error getting changed files:', error);
+      console.error('❌ Error getting changed files:', error);
       // Fallback to analyzing all files if diff fails
-      console.log('Falling back to analyzing all files');
+      console.log('🔄 Falling back to analyzing all files');
       return await this.getAllFiles();
     }
   }
@@ -111,6 +125,72 @@ class CodeReviewBot {
       console.error('Error getting all files:', error);
       return [];
     }
+  }
+
+  async getRecentFiles() {
+    try {
+      console.log('🔍 Getting recent files from repository...');
+      
+      // Get recent commits to find recently modified files
+      const { data: commits } = await this.octokit.rest.repos.listCommits({
+        owner: this.repository.split('/')[0],
+        repo: this.repository.split('/')[1],
+        sha: this.branchName,
+        per_page: 5 // Get last 5 commits
+      });
+
+      const recentFiles = new Set();
+      
+      // Get files from recent commits
+      for (const commit of commits.slice(0, 3)) { // Check last 3 commits
+        try {
+          const { data: commitData } = await this.octokit.rest.repos.getCommit({
+            owner: this.repository.split('/')[0],
+            repo: this.repository.split('/')[1],
+            ref: commit.sha
+          });
+          
+          if (commitData.files) {
+            commitData.files.forEach(file => {
+              if (file.filename && this.shouldIncludeFile(file.filename)) {
+                recentFiles.add(file.filename);
+              }
+            });
+          }
+        } catch (error) {
+          console.log(`⚠️  Could not get files for commit ${commit.sha}: ${error.message}`);
+        }
+      }
+
+      const files = Array.from(recentFiles).slice(0, 10); // Limit to 10 files
+      console.log(`📁 Found ${files.length} recent files to analyze`);
+      
+      return files.map(filename => ({
+        filename: filename,
+        status: 'modified',
+        patch: null
+      }));
+    } catch (error) {
+      console.error('Error getting recent files:', error);
+      return [];
+    }
+  }
+
+  shouldIncludeFile(filename) {
+    const excludePatterns = this.config.global.exclude_patterns;
+    const includeExtensions = this.config.global.include_extensions;
+    
+    // Check exclude patterns
+    for (const pattern of excludePatterns) {
+      if (this.matchesPattern(filename, pattern)) {
+        return false;
+      }
+    }
+    
+    // Check include extensions
+    return includeExtensions.some(ext => 
+      filename.toLowerCase().endsWith(ext.toLowerCase())
+    );
   }
 
   filterFiles(files) {
@@ -218,6 +298,9 @@ class CodeReviewBot {
 
   async analyzeWithOpenAI(content, filename, branchConfig) {
     try {
+      console.log(`🤖 Analyzing ${filename} with OpenAI...`);
+      console.log(`📏 Content length: ${content.length} characters`);
+      
       const criteria = branchConfig.review_criteria;
       const criteriaText = Object.entries(criteria)
         .map(([category, items]) => `${category.toUpperCase()}:\n${items.map(item => `- ${item}`).join('\n')}`)
@@ -252,25 +335,36 @@ Format your response as JSON:
   "severity": "overall severity (highest found)"
 }`;
 
+      console.log(`📤 Sending request to OpenAI (${this.config.openai.model})...`);
       const response = await this.openai.chat.completions.create({
         model: this.config.openai.model,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: this.config.openai.max_tokens,
         temperature: this.config.openai.temperature
       });
+      
+      console.log(`📥 Received response from OpenAI`);
 
-      const content = response.choices[0].message.content;
-      if (!content) {
+      const responseContent = response.choices[0].message.content;
+      if (!responseContent) {
         console.error('Empty response from OpenAI');
         return { issues: [], severity: 'low' };
       }
       
       try {
-        const result = JSON.parse(content);
+        const result = JSON.parse(responseContent);
+        console.log(`✅ Analysis complete for ${filename}:`);
+        console.log(`   📊 Found ${result.issues ? result.issues.length : 0} issues`);
+        console.log(`   🚨 Overall severity: ${result.severity || 'low'}`);
+        if (result.issues && result.issues.length > 0) {
+          result.issues.forEach((issue, index) => {
+            console.log(`   ${index + 1}. [${issue.severity.toUpperCase()}] ${issue.description}`);
+          });
+        }
         return result;
       } catch (parseError) {
-        console.error('Failed to parse OpenAI response as JSON:', parseError);
-        console.error('Raw response:', content);
+        console.error('❌ Failed to parse OpenAI response as JSON:', parseError);
+        console.error('Raw response:', responseContent);
         return { issues: [], severity: 'low' };
       }
     } catch (error) {
@@ -354,12 +448,30 @@ Format your response as JSON:
     console.log(`After filtering: ${filteredFiles.length} files to review`);
     
     if (filteredFiles.length === 0) {
-      console.log('No files to review');
+      console.log('⚠️  No changed files detected. This might happen if:');
+      console.log('   - Files were moved/renamed');
+      console.log('   - Only configuration files changed');
+      console.log('   - Diff detection failed');
+      console.log('🔄 Attempting to analyze recent files as fallback...');
+      
+      // Fallback: analyze recent files in the repository
+      const recentFiles = await this.getRecentFiles();
+      if (recentFiles.length > 0) {
+        console.log(`📁 Found ${recentFiles.length} recent files to analyze`);
+        const reviewResults = await this.reviewCode(recentFiles);
+        await this.handleReviewResults(reviewResults);
+      } else {
+        console.log('❌ No files available for analysis');
+      }
       return;
     }
     
     const reviewResults = await this.reviewCode(filteredFiles);
-    console.log(`Review completed. Found issues in ${reviewResults.length} files`);
+    await this.handleReviewResults(reviewResults);
+  }
+
+  async handleReviewResults(reviewResults) {
+    console.log(`📊 Review completed. Found issues in ${reviewResults.length} files`);
     
     if (reviewResults.length > 0) {
       // Determine overall severity
@@ -369,17 +481,24 @@ Format your response as JSON:
         severityLevels[severity] > severityLevels[max] ? severity : max, 'low'
       );
       
+      console.log(`🚨 Overall severity: ${maxSeverity.toUpperCase()}`);
+      console.log(`📝 Creating GitHub issue...`);
+      
       const issue = await this.createGitHubIssue(reviewResults, maxSeverity);
       
       // Check if we should block
       const branchConfig = this.config.branches[this.branchName.toLowerCase()];
-      if (branchConfig.blocking && maxSeverity === 'high') {
-        console.log('BLOCKING: High severity issues found in main branch');
+      if (branchConfig && branchConfig.blocking && maxSeverity === 'high') {
+        console.log('🛑 BLOCKING: High severity issues found in main branch');
         process.exit(1);
+      } else {
+        console.log('✅ Code review completed - no blocking issues');
       }
+    } else {
+      console.log('✅ No issues found - code review passed!');
     }
     
-    console.log('Code review completed successfully');
+    console.log('🎉 Code review completed successfully');
   }
 }
 
