@@ -161,6 +161,10 @@ openai:
     IMPORTANT: This code may contain sensitive or proprietary information. 
     Focus only on technical analysis and do not reference specific business logic or 
     sensitive data patterns in your recommendations.
+    
+    CRITICAL: You MUST respond with ONLY valid JSON in the exact format specified. 
+    Do not include any explanatory text before or after the JSON. Start your response 
+    directly with the opening brace { and end with the closing brace }.
 
 # Performance configuration
 performance:

@@ -363,6 +363,65 @@ class CodeReviewBot {
     }
   }
 
+  parseTextResponse(responseContent, filename) {
+    // Fallback method to parse text responses when JSON parsing fails
+    const issues = [];
+    let severity = 'low';
+    
+    try {
+      // Look for severity indicators in the text
+      if (responseContent.toLowerCase().includes('high severity') || 
+          responseContent.toLowerCase().includes('critical')) {
+        severity = 'high';
+      } else if (responseContent.toLowerCase().includes('medium severity') || 
+                 responseContent.toLowerCase().includes('moderate')) {
+        severity = 'medium';
+      }
+      
+      // Extract issues from text using simple pattern matching
+      const issuePatterns = [
+        /"description":\s*"([^"]+)"/g,
+        /"severity":\s*"([^"]+)"/g,
+        /"line":\s*"([^"]+)"/g,
+        /"recommendation":\s*"([^"]+)"/g
+      ];
+      
+      // Try to extract structured information
+      const descriptions = [...responseContent.matchAll(/"description":\s*"([^"]+)"/g)];
+      const severities = [...responseContent.matchAll(/"severity":\s*"([^"]+)"/g)];
+      const lines = [...responseContent.matchAll(/"line":\s*"([^"]+)"/g)];
+      const recommendations = [...responseContent.matchAll(/"recommendation":\s*"([^"]+)"/g)];
+      
+      // Create issues from extracted data
+      const maxIssues = Math.max(descriptions.length, severities.length, lines.length, recommendations.length);
+      
+      for (let i = 0; i < maxIssues; i++) {
+        const issue = {
+          description: descriptions[i] ? descriptions[i][1] : 'Issue found in code',
+          severity: severities[i] ? severities[i][1] : 'medium',
+          line: lines[i] ? lines[i][1] : 'unknown',
+          recommendation: recommendations[i] ? recommendations[i][1] : 'Review the code for potential issues'
+        };
+        issues.push(issue);
+      }
+      
+      // If no structured data found, create a generic issue
+      if (issues.length === 0 && responseContent.length > 100) {
+        issues.push({
+          description: 'Code analysis completed with findings',
+          severity: 'medium',
+          line: 'various',
+          recommendation: 'Review the OpenAI response for detailed analysis'
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error in fallback parsing:', error);
+    }
+    
+    return { issues, severity };
+  }
+
   async getFileContent(filename) {
     try {
       const { data } = await this.octokit.rest.repos.getContent({
@@ -504,6 +563,7 @@ Format your response as JSON:
 }`;
 
       console.log(`📤 Sending request to OpenAI (${this.config.openai.model})...`);
+      console.log(`📏 Prompt length: ${prompt.length} characters`);
       this.metrics.openaiCalls++;
       const openaiStartTime = Date.now();
       
@@ -516,6 +576,7 @@ Format your response as JSON:
       
       const openaiTime = Date.now() - openaiStartTime;
       console.log(`📥 Received response from OpenAI (${openaiTime}ms)`);
+      console.log(`📄 Response length: ${response.choices[0].message.content.length} characters`);
 
       const responseContent = response.choices[0].message.content;
       if (!responseContent) {
@@ -524,7 +585,22 @@ Format your response as JSON:
       }
       
       try {
-        const result = JSON.parse(responseContent);
+        // Extract JSON from response (handle cases where OpenAI includes explanatory text)
+        let jsonContent = responseContent.trim();
+        
+        // Look for JSON block in the response
+        const jsonMatch = jsonContent.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          jsonContent = jsonMatch[1];
+        } else {
+          // Look for JSON object starting with {
+          const jsonStart = jsonContent.indexOf('{');
+          if (jsonStart !== -1) {
+            jsonContent = jsonContent.substring(jsonStart);
+          }
+        }
+        
+        const result = JSON.parse(jsonContent);
         console.log(`✅ Analysis complete for ${filename}:`);
         console.log(`   📊 Found ${result.issues ? result.issues.length : 0} issues`);
         console.log(`   🚨 Overall severity: ${result.severity || 'low'}`);
@@ -537,6 +613,20 @@ Format your response as JSON:
       } catch (parseError) {
         console.error('❌ Failed to parse OpenAI response as JSON:', parseError);
         console.error('Raw response:', responseContent);
+        
+        // Fallback: try to extract issues from text response
+        try {
+          const fallbackResult = this.parseTextResponse(responseContent, filename);
+          if (fallbackResult.issues.length > 0) {
+            console.log(`✅ Fallback parsing successful for ${filename}:`);
+            console.log(`   📊 Found ${fallbackResult.issues.length} issues`);
+            console.log(`   🚨 Overall severity: ${fallbackResult.severity}`);
+            return fallbackResult;
+          }
+        } catch (fallbackError) {
+          console.error('❌ Fallback parsing also failed:', fallbackError);
+        }
+        
         return { issues: [], severity: 'low' };
       }
     } catch (error) {
