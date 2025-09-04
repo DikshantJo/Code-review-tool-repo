@@ -430,10 +430,32 @@ Format your response as JSON:
         labels: [label.name]
       });
 
-      console.log(`Created issue #${issue.number}: ${title}`);
+      console.log(`✅ Created issue #${issue.number}: ${title}`);
       return issue;
     } catch (error) {
-      console.error('Error creating GitHub issue:', error);
+      console.error('❌ Error creating GitHub issue:', error.message);
+      
+      if (error.status === 403) {
+        console.error('🔒 Permission denied. This usually means:');
+        console.error('   1. The GITHUB_TOKEN doesn\'t have "issues: write" permission');
+        console.error('   2. The workflow needs explicit permissions in the YAML file');
+        console.error('   3. The repository settings restrict issue creation');
+        console.error('');
+        console.error('💡 Solution: Add this to your workflow file:');
+        console.error('   permissions:');
+        console.error('     contents: read');
+        console.error('     issues: write');
+        console.error('     pull-requests: read');
+      } else if (error.status === 404) {
+        console.error('🔍 Repository not found. Check the repository name and permissions.');
+      } else if (error.status === 422) {
+        console.error('📝 Invalid issue data. Check the issue title and body format.');
+      } else {
+        console.error(`🚨 Unexpected error (${error.status}): ${error.message}`);
+      }
+      
+      // Don't exit on issue creation failure - just log the error
+      console.log('⚠️  Continuing without creating issue...');
     }
   }
 

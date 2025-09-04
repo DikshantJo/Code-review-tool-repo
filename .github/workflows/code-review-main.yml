@@ -9,6 +9,10 @@ jobs:
   code-review:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action == 'opened')
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     
     steps:
     - name: Checkout code
