@@ -22,6 +22,11 @@ global:
     - "**/dist/**"
     - "**/build/**"
     - "**/.git/**"
+    # Additional exclusions for sensitive code (uncomment as needed)
+    # - "**/config/production*"
+    # - "**/private/**"
+    # - "**/internal/**"
+    # - "**/proprietary/**"
   
   # File types to include in review
   include_extensions:
@@ -152,3 +157,7 @@ openai:
     You are a senior code reviewer analyzing code changes for security vulnerabilities, 
     coding standards, and performance issues. Provide a detailed analysis with specific 
     recommendations and severity levels (high/medium/low).
+    
+    IMPORTANT: This code may contain sensitive or proprietary information. 
+    Focus only on technical analysis and do not reference specific business logic or 
+    sensitive data patterns in your recommendations.
