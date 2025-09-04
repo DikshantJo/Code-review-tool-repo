@@ -25,6 +25,15 @@ class CodeReviewBot {
     this.sha = process.env.GITHUB_SHA;
     this.branchName = process.env.BRANCH_NAME;
     this.sourceBranch = process.env.SOURCE_BRANCH;
+    
+    // Performance tracking
+    this.startTime = Date.now();
+    this.metrics = {
+      filesProcessed: 0,
+      apiCalls: 0,
+      openaiCalls: 0,
+      totalTime: 0
+    };
   }
 
   validateEnvironment() {
@@ -35,11 +44,34 @@ class CodeReviewBot {
       console.error('Missing required environment variables:', missing.join(', '));
       process.exit(1);
     }
+    
+    // Security: Validate repository name format
+    const repoName = process.env.GITHUB_REPOSITORY;
+    if (!repoName || !/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repoName)) {
+      console.error('Invalid GITHUB_REPOSITORY format:', repoName);
+      process.exit(1);
+    }
+    
+    // Security: Validate SHA format (should be 40 character hex string)
+    const sha = process.env.GITHUB_SHA;
+    if (!sha || !/^[a-f0-9]{40}$/.test(sha)) {
+      console.error('Invalid GITHUB_SHA format:', sha);
+      process.exit(1);
+    }
   }
 
   loadConfig() {
     try {
       const configPath = path.join(process.cwd(), 'config', 'review-criteria.yml');
+      
+      // Security: Validate that the config path is within the expected directory
+      const resolvedPath = path.resolve(configPath);
+      const expectedDir = path.resolve(process.cwd(), 'config');
+      
+      if (!resolvedPath.startsWith(expectedDir)) {
+        throw new Error('Invalid configuration path detected');
+      }
+      
       const configContent = fs.readFileSync(configPath, 'utf8');
       return yaml.parse(configContent);
     } catch (error) {
@@ -58,6 +90,7 @@ class CodeReviewBot {
       if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
         // For PRs, compare with base branch
         console.log(`🔗 Pull request #${process.env.GITHUB_EVENT_NUMBER}`);
+        this.metrics.apiCalls++;
         const { data: pr } = await this.octokit.rest.pulls.get({
           owner: this.repository.split('/')[0],
           repo: this.repository.split('/')[1],
@@ -68,6 +101,7 @@ class CodeReviewBot {
       } else {
         // For pushes, compare with previous commit
         console.log(`📤 Push event - getting previous commit`);
+        this.metrics.apiCalls++;
         const { data: commits } = await this.octokit.rest.repos.listCommits({
           owner: this.repository.split('/')[0],
           repo: this.repository.split('/')[1],
@@ -84,6 +118,7 @@ class CodeReviewBot {
       }
 
       console.log(`🔄 Comparing commits: ${baseSha} → ${this.sha}`);
+      this.metrics.apiCalls++;
       const { data: comparison } = await this.octokit.rest.repos.compareCommits({
         owner: this.repository.split('/')[0],
         repo: this.repository.split('/')[1],
@@ -215,8 +250,117 @@ class CodeReviewBot {
   }
 
   matchesPattern(filename, pattern) {
-    const regex = new RegExp(pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
-    return regex.test(filename);
+    // Security: Validate pattern to prevent ReDoS attacks
+    if (pattern.length > 1000) {
+      console.warn(`Pattern too long, skipping: ${pattern.substring(0, 50)}...`);
+      return false;
+    }
+    
+    // Security: Prevent complex regex patterns that could cause ReDoS
+    if (pattern.includes('**') && pattern.split('**').length > 10) {
+      console.warn(`Pattern too complex, skipping: ${pattern}`);
+      return false;
+    }
+    
+    try {
+      // Simple glob pattern matching using string methods
+      // This is more reliable than regex conversion
+      
+      // Handle ** patterns
+      if (pattern.includes('**')) {
+        // Handle specific common patterns
+        if (pattern === '**/node_modules/**') {
+          return filename.includes('/node_modules/') || filename.startsWith('node_modules/');
+        }
+        if (pattern === '**/*.js') {
+          return filename.endsWith('.js');
+        }
+        if (pattern === '**/*.env*') {
+          return filename.includes('.env');
+        }
+        if (pattern === '**/*.key') {
+          return filename.endsWith('.key');
+        }
+        if (pattern === '**/*.pem') {
+          return filename.endsWith('.pem');
+        }
+        if (pattern === '**/*.p12') {
+          return filename.endsWith('.p12');
+        }
+        if (pattern === '**/*.pfx') {
+          return filename.endsWith('.pfx');
+        }
+        if (pattern === '**/credentials*') {
+          return filename.includes('credentials');
+        }
+        if (pattern === '**/secrets*') {
+          return filename.includes('secrets');
+        }
+        if (pattern === '**/*.db') {
+          return filename.endsWith('.db');
+        }
+        if (pattern === '**/*.sqlite') {
+          return filename.endsWith('.sqlite');
+        }
+        if (pattern === '**/*.sqlite3') {
+          return filename.endsWith('.sqlite3');
+        }
+        if (pattern === '**/database*') {
+          return filename.includes('database');
+        }
+        if (pattern === '**/db/*') {
+          return filename.startsWith('db/');
+        }
+        if (pattern === '**/migrations/*') {
+          return filename.startsWith('migrations/');
+        }
+        if (pattern === '**/dist/**') {
+          return filename.includes('/dist/') || filename.startsWith('dist/');
+        }
+        if (pattern === '**/build/**') {
+          return filename.includes('/build/') || filename.startsWith('build/');
+        }
+        if (pattern === '**/.git/**') {
+          return filename.includes('/.git/') || filename.startsWith('.git/');
+        }
+        
+        // Generic ** pattern handling
+        const parts = pattern.split('**');
+        if (parts.length === 2) {
+          const prefix = parts[0];
+          const suffix = parts[1];
+          
+          if (prefix === '' && suffix === '') {
+            return true; // Pattern is just "**"
+          } else if (prefix === '') {
+            return filename.endsWith(suffix);
+          } else if (suffix === '') {
+            return filename.startsWith(prefix);
+          } else {
+            return filename.includes(prefix + suffix);
+          }
+        }
+      }
+      
+      // Handle simple * patterns
+      if (pattern.includes('*') && !pattern.includes('**')) {
+        // Convert to regex for simple wildcards
+        let regexPattern = pattern
+          .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+          .replace(/\*/g, '[^/]*');
+        
+        regexPattern = '^' + regexPattern + '$';
+        const regex = new RegExp(regexPattern);
+        return regex.test(filename);
+      }
+      
+      // Exact match
+      return filename === pattern;
+      
+    } catch (error) {
+      console.warn(`Invalid pattern, skipping: ${pattern}`);
+      return false;
+    }
   }
 
   async getFileContent(filename) {
@@ -255,45 +399,69 @@ class CodeReviewBot {
       return [];
     }
 
+    console.log(`🔄 Processing ${files.length} files in parallel...`);
+    
+    // Process files in parallel with concurrency limit
+    const concurrencyLimit = this.config.performance?.concurrency_limit || 3;
     const issues = [];
     
-    for (const file of files) {
-      try {
-        let content = '';
-        
-        // For GitHub API files, use patch if available, otherwise get full content
-        if (file.patch) {
-          content = file.patch;
-        } else if (file.filename) {
-          content = await this.getFileContent(file.filename);
+    for (let i = 0; i < files.length; i += concurrencyLimit) {
+      const batch = files.slice(i, i + concurrencyLimit);
+      console.log(`📦 Processing batch ${Math.floor(i / concurrencyLimit) + 1}/${Math.ceil(files.length / concurrencyLimit)} (${batch.length} files)`);
+      
+      const batchPromises = batch.map(file => this.processFile(file, branchConfig));
+      const batchResults = await Promise.allSettled(batchPromises);
+      
+      batchResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          issues.push(result.value);
+        } else if (result.status === 'rejected') {
+          console.error(`Error processing ${batch[index].filename}:`, result.reason);
         }
-        
-        if (!content) {
-          console.log(`Skipping ${file.filename}: no content available`);
-          continue;
-        }
-
-        // Limit content size for OpenAI API (reduce from 4000 to 3000 chars to be safe)
-        const maxContentLength = 3000;
-        if (content.length > maxContentLength) {
-          content = content.substring(0, maxContentLength) + '\n... (truncated)';
-        }
-
-        const reviewResult = await this.analyzeWithOpenAI(content, file.filename, branchConfig);
-        
-        if (reviewResult.issues && reviewResult.issues.length > 0) {
-          issues.push({
-            file: file.filename,
-            issues: reviewResult.issues,
-            severity: reviewResult.severity
-          });
-        }
-      } catch (error) {
-        console.error(`Error reviewing ${file.filename}:`, error);
-      }
+      });
     }
     
     return issues;
+  }
+
+  async processFile(file, branchConfig) {
+    try {
+      let content = '';
+      
+      // For GitHub API files, use patch if available, otherwise get full content
+      if (file.patch) {
+        content = file.patch;
+      } else if (file.filename) {
+        content = await this.getFileContent(file.filename);
+      }
+      
+      if (!content) {
+        console.log(`⏭️  Skipping ${file.filename}: no content available`);
+        return null;
+      }
+
+      // Limit content size for OpenAI API
+      const maxContentLength = this.config.performance?.max_file_size || 3000;
+      if (content.length > maxContentLength) {
+        content = content.substring(0, maxContentLength) + '\n... (truncated)';
+      }
+
+      const reviewResult = await this.analyzeWithOpenAI(content, file.filename, branchConfig);
+      this.metrics.filesProcessed++;
+      
+      if (reviewResult.issues && reviewResult.issues.length > 0) {
+        return {
+          file: file.filename,
+          issues: reviewResult.issues,
+          severity: reviewResult.severity
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`❌ Error reviewing ${file.filename}:`, error);
+      return null;
+    }
   }
 
   async analyzeWithOpenAI(content, filename, branchConfig) {
@@ -336,6 +504,9 @@ Format your response as JSON:
 }`;
 
       console.log(`📤 Sending request to OpenAI (${this.config.openai.model})...`);
+      this.metrics.openaiCalls++;
+      const openaiStartTime = Date.now();
+      
       const response = await this.openai.chat.completions.create({
         model: this.config.openai.model,
         messages: [{ role: 'user', content: prompt }],
@@ -343,7 +514,8 @@ Format your response as JSON:
         temperature: this.config.openai.temperature
       });
       
-      console.log(`📥 Received response from OpenAI`);
+      const openaiTime = Date.now() - openaiStartTime;
+      console.log(`📥 Received response from OpenAI (${openaiTime}ms)`);
 
       const responseContent = response.choices[0].message.content;
       if (!responseContent) {
@@ -520,7 +692,37 @@ Format your response as JSON:
       console.log('✅ No issues found - code review passed!');
     }
     
+    this.printPerformanceSummary();
     console.log('🎉 Code review completed successfully');
+  }
+
+  printPerformanceSummary() {
+    const totalTime = Date.now() - this.startTime;
+    this.metrics.totalTime = totalTime;
+    
+    console.log('\n📊 Performance Summary:');
+    console.log(`   ⏱️  Total execution time: ${totalTime}ms (${(totalTime / 1000).toFixed(2)}s)`);
+    console.log(`   📁 Files processed: ${this.metrics.filesProcessed}`);
+    console.log(`   🔗 GitHub API calls: ${this.metrics.apiCalls}`);
+    console.log(`   🤖 OpenAI API calls: ${this.metrics.openaiCalls}`);
+    
+    if (this.metrics.filesProcessed > 0) {
+      const avgTimePerFile = totalTime / this.metrics.filesProcessed;
+      console.log(`   📈 Average time per file: ${avgTimePerFile.toFixed(0)}ms`);
+    }
+    
+    if (this.metrics.openaiCalls > 0) {
+      const avgOpenaiTime = totalTime / this.metrics.openaiCalls;
+      console.log(`   🧠 Average OpenAI response time: ${avgOpenaiTime.toFixed(0)}ms`);
+    }
+    
+    // Performance recommendations
+    if (totalTime > 30000) { // 30 seconds
+      console.log('\n💡 Performance Tips:');
+      console.log('   - Consider reducing the number of files analyzed');
+      console.log('   - Check if file size limits are appropriate');
+      console.log('   - Monitor OpenAI API response times');
+    }
   }
 }
 

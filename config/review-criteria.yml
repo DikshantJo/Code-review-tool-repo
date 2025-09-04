@@ -161,3 +161,10 @@ openai:
     IMPORTANT: This code may contain sensitive or proprietary information. 
     Focus only on technical analysis and do not reference specific business logic or 
     sensitive data patterns in your recommendations.
+
+# Performance configuration
+performance:
+  concurrency_limit: 3  # Number of files to process simultaneously
+  max_file_size: 3000   # Maximum characters to send to OpenAI per file
+  batch_size: 3         # Number of files per batch
+  timeout_ms: 30000     # Timeout for OpenAI requests (30 seconds)
