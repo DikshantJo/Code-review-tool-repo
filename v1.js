@@ -85,7 +85,31 @@ console.log('Secure token with special chars:', generateToken({ length: 16, incl
         throw new Error('At least one character set must be included');
     }
 
+    let token = '';  const uppercaseChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercaseChars = 'abcdefghijklmnopqrstuvwxyz';
+    const numberChars = '0123456789';
+    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
+    let chars = '';
+    if (includeUppercase) chars += uppercaseChars;
+    if (includeLowercase) chars += lowercaseChars;
+    if (includeNumbers) chars += numberChars;
+    if (includeSpecialChars) chars += specialChars;
+
+    if (chars === '') {
+        throw new Error('At least one character set must be included');
+    }
+
     let token = '';
+    const array = new Uint32Array(length);
+    crypto.getRandomValues(array);
+
+    for (let i = 0; i < length; i++) {
+        token += chars[array[i] % chars.length];
+    }
+
+    return token;
+}
     const array = new Uint32Array(length);
     crypto.getRandomValues(array);
 
