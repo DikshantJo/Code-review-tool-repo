@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sample App</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #f4f4f9;
+  color: #333;
+}
+
+header, footer {
+  background: #6200ee;
+  color: white;
+  text-align: center;
+  padding: 1rem;
+}
+
+main {
+  padding: 2rem;
+  max-width: 600px;
+  margin: auto;
+}
+
+section {
+  margin-bottom: 2rem;
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+input {
+  padding: 0.5rem;
+  width: 70%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+button {
+  margin-left: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: #6200ee;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #3700b3;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+li {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background: #eee;
+  border-radius: 4px;
+}
+
+  </style>
+</head>
+<body>
+  <header>
+    <h1>My Sample App</h1>
+  </header>
+
+  <main>
+    <section>
+      <h2>Message Board</h2>
+      <input type="text" id="messageInput" placeholder="Type a message...">
+      <button id="addBtn">Add Message</button>
+      <ul id="messageList"></ul>
+    </section>
+
+    <section>
+      <h2>Counter</h2>
+      <p id="counterValue">0</p>
+      <button id="incBtn">Increase</button>
+      <button id="decBtn">Decrease</button>
+    </section>
+  </main>
+
+  <footer>
+    <p>Sample HTML + CSS + JS app for testing tools</p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script>
+    // Counter logic
+let counter = 0;
+const counterValue = document.getElementById("counterValue");
+document.getElementById("incBtn").addEventListener("click", () => {
+  counter++;
+  counterValue.textContent = counter;
+});
+document.getElementById("decBtn").addEventListener("click", () => {
+  counter--;
+  counterValue.textContent = counter;
+});
+
+// Message board logic
+const addBtn = document.getElementById("addBtn");
+const messageInput = document.getElementById("messageInput");
+const messageList = document.getElementById("messageList");
+
+addBtn.addEventListener("click", () => {
+  const msg = messageInput.value.trim();
+  if (msg) {
+    const li = document.createElement("li");
+    li.textContent = msg;
+    messageList.appendChild(li);
+    messageInput.value = "";
+  }
+});
+
+  </script>
+</body>
+</html>
