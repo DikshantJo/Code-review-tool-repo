@@ -54,9 +54,16 @@ global:
     - ".svelte"
 
 # Branch-specific configurations
+# Blocking options:
+#   - "none": No blocking (allows all commits)
+#   - "high_only": Block only high severity issues
+#   - "medium_and_high": Block medium and high severity issues
+#   - "all_severities": Block any issues found
+#   - "custom": Use custom_blocking_rules configuration
 branches:
   dev:
     blocking: false  # Allows code to move even if issues found
+    blocking_criteria: "none"  # No blocking for dev branch
     severity_threshold: "medium"  # Only create issues for medium+ severity
     review_criteria:
       security:
@@ -76,6 +83,7 @@ branches:
     
   uat:
     blocking: false  # Allows code to move even if issues found
+    blocking_criteria: "none"  # No blocking for UAT branch
     severity_threshold: "low"  # Create issues for all severity levels
     review_criteria:
       security:
@@ -101,6 +109,7 @@ branches:
     
   main:
     blocking: true  # Blocks code movement if critical issues found
+    blocking_criteria: "high_only"  # Block on high severity issues only
     severity_threshold: "low"  # Create issues for all severity levels
     review_criteria:
       security:

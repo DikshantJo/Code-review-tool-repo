@@ -770,11 +770,21 @@ Format your response as JSON:
       
       const issue = await this.createGitHubIssue(reviewResults, maxSeverity);
       
-      // Check if we should block
+      // Check if we should block based on branch configuration
       const branchConfig = this.config.branches[this.branchName.toLowerCase()];
-      if (branchConfig && branchConfig.blocking && maxSeverity === 'high') {
-        console.log('🛑 BLOCKING: High severity issues found in main branch');
-        process.exit(1);
+      if (branchConfig && branchConfig.blocking) {
+        const shouldBlock = this.shouldBlockCommit(maxSeverity, branchConfig);
+        if (shouldBlock) {
+          console.log(`🛑 BLOCKING COMMIT: ${maxSeverity.toUpperCase()} severity issues found in ${this.branchName} branch`);
+          console.log(`📋 Blocking criteria: ${branchConfig.blocking_criteria || 'default'}`);
+          console.log(`🚨 Issues found: ${reviewResults.length} files with ${severities.length} total issues`);
+          
+          // Create a detailed blocking report
+          await this.createBlockingReport(reviewResults, maxSeverity);
+          
+          // Exit with error code to fail the GitHub Action
+          process.exit(1);
+        }
       } else {
         console.log('✅ Code review completed - no blocking issues');
       }
@@ -784,6 +794,69 @@ Format your response as JSON:
     
     this.printPerformanceSummary();
     console.log('🎉 Code review completed successfully');
+  }
+
+  shouldBlockCommit(maxSeverity, branchConfig) {
+    // Determine if commit should be blocked based on configuration
+    const blockingCriteria = branchConfig.blocking_criteria || 'high_only';
+    
+    switch (blockingCriteria) {
+      case 'high_only':
+        return maxSeverity === 'high';
+      
+      case 'medium_and_high':
+        return maxSeverity === 'high' || maxSeverity === 'medium';
+      
+      case 'all_severities':
+        return true; // Block on any issues
+      
+      case 'custom':
+        // Use custom blocking rules
+        const customRules = branchConfig.custom_blocking_rules || {};
+        return customRules[maxSeverity] === true;
+      
+      default:
+        return maxSeverity === 'high';
+    }
+  }
+
+  async createBlockingReport(reviewResults, maxSeverity) {
+    try {
+      console.log('\n📋 BLOCKING REPORT:');
+      console.log('=' .repeat(50));
+      console.log(`🚨 Severity: ${maxSeverity.toUpperCase()}`);
+      console.log(`📁 Files with issues: ${reviewResults.length}`);
+      console.log(`🔍 Total issues found: ${reviewResults.reduce((sum, r) => sum + r.issues.length, 0)}`);
+      console.log(`🌿 Branch: ${this.branchName}`);
+      console.log(`📤 Source: ${this.sourceBranch}`);
+      console.log(`🔗 Commit: ${this.sha}`);
+      console.log('=' .repeat(50));
+      
+      reviewResults.forEach((result, index) => {
+        console.log(`\n📄 File ${index + 1}: ${result.file}`);
+        console.log(`   🚨 Severity: ${result.severity.toUpperCase()}`);
+        console.log(`   📊 Issues: ${result.issues.length}`);
+        
+        result.issues.forEach((issue, issueIndex) => {
+          console.log(`   ${issueIndex + 1}. [${issue.severity.toUpperCase()}] ${issue.description}`);
+          if (issue.line && issue.line !== 'unknown') {
+            console.log(`      📍 Line: ${issue.line}`);
+          }
+          if (issue.recommendation) {
+            console.log(`      💡 Fix: ${issue.recommendation}`);
+          }
+        });
+      });
+      
+      console.log('\n🛑 COMMIT BLOCKED - Fix issues above before merging');
+      console.log('💡 To bypass blocking (not recommended):');
+      console.log('   1. Fix the identified issues');
+      console.log('   2. Re-run the code review');
+      console.log('   3. Or temporarily disable blocking in config');
+      
+    } catch (error) {
+      console.error('Error creating blocking report:', error);
+    }
   }
 
   printPerformanceSummary() {
