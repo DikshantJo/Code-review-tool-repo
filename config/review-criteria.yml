@@ -61,7 +61,7 @@ global:
 #   - "all_severities": Block any issues found
 #   - "custom": Use custom_blocking_rules configuration
 branches:
-  dev:
+  development:
     blocking: false  # Allows code to move even if issues found
     blocking_criteria: "none"  # No blocking for dev branch
     severity_threshold: "medium"  # Only create issues for medium+ severity
