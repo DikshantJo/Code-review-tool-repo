@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Clean JS Example</title>
+  <style>
+    :root {
+      --primary: #6200ee;
+      --primary-dark: #3700b3;
+      --bg: #f9f9fb;
+      --text: #333;
+    }
+
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    h1 {
+      color: var(--primary);
+    }
+
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background: #fff;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+
+    input, button {
+      padding: 0.6rem;
+      margin: 0.3rem 0;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    button:hover {
+      background: var(--primary-dark);
+    }
+
+    ul {
+      margin-top: 1rem;
+      padding: 0;
+      list-style: none;
+    }
+
+    li {
+      background: #f4f4f9;
+      padding: 0.6rem;
+      margin: 0.4rem 0;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Secure Message Board</h1>
+
+    <label for="messageInput">Message:</label>
+    <input type="text" id="messageInput" maxlength="100" placeholder="Type your message...">
+    <button id="addBtn" aria-label="Add message">Add</button>
+
+    <ul id="messageList" aria-live="polite"></ul>
+  </div>
+
+  <script>
+    "use strict";
+
+    (() => {
+      // Cache DOM references for performance
+      const input = document.getElementById("messageInput");
+      const button = document.getElementById("addBtn");
+      const list = document.getElementById("messageList");
+
+      // Utility: sanitize text (defense-in-depth, even though we use textContent)
+      const sanitize = (str) => str.replace(/[<>]/g, "");
+
+      // Event delegation pattern (scalable if we add more actions later)
+      button.addEventListener("click", () => {
+        const msg = input.value.trim();
+
+        if (!msg) {
+          alert("Message cannot be empty.");
+          return;
+        }
+
+        // Defensive coding: enforce length even if maxlength attribute is bypassed
+        if (msg.length > 100) {
+          alert("Message too long (max 100 characters).");
+          return;
+        }
+
+        // Create list item securely
+        const li = document.createElement("li");
+        li.textContent = sanitize(msg); // textContent is already safe
+        list.appendChild(li);
+
+        input.value = "";
+        input.focus();
+      });
+    })();
+  </script>
+</body>
+</html>
