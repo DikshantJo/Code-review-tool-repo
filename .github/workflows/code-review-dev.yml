@@ -1,9 +1,9 @@
 name: Code Review - DEV Branch
 on:
   push:
-    branches: [ dev ]
+    branches: [ development ]
   pull_request:
-    branches: [ dev ]
+    branches: [ development ]
 
 jobs:
   code-review:
